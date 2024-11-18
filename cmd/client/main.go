@@ -3,22 +3,26 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
+	"go-discord/pkg/message"
+	pkgzerolog "go-discord/pkg/zerolog"
+
+	"github.com/rs/zerolog/log"
+
 	"net"
 	"sync"
 )
 
 var (
-	server      = flag.String("client-addr", "127.0.0.1:7811", "client address to connect to")
-	concurrency = flag.Int("c", 10, "how many clients to spawn")
+	server = flag.String("server", "127.0.0.1:7811", "server address to connect to")
 )
 
 func main() {
 	flag.Parse()
+	log.Logger = *pkgzerolog.SetupZeroLog("debug")
 
 	conn, err := net.Dial("tcp", *server)
 	if err != nil {
-		log.Fatalf("failed to connect to server: %v", err)
+		log.Fatal().Msgf("failed to connect to server: %v", err)
 	}
 
 	var wg sync.WaitGroup
@@ -29,10 +33,10 @@ func main() {
 			b := make([]byte, 512)
 			_, err := conn.Read(b)
 			if err != nil {
-				log.Printf("error reading from conn: %v", err)
+				log.Info().Msgf("error reading from conn: %v", err)
 				return
 			}
-			// fmt.Printf("user: %s\n", b)
+			fmt.Printf("user: %s\n", b)
 		}
 	}()
 	wg.Wait()
@@ -42,8 +46,8 @@ func main() {
 		fmt.Printf("> ")
 		fmt.Scanln(&input)
 		fmt.Println(input)
-		// conn.Write([]byte(input))
-		// conn.Write([]byte{message.LineTerminationByte})
+		conn.Write([]byte(input))
+		conn.Write([]byte{message.LineTerminationByte})
 	}
 
 }
