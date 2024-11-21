@@ -1,0 +1,15 @@
+FROM golang:1.23.3
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+
+RUN go mod download
+
+COPY . .
+
+RUN cd cmd/benchmark && go build -o /app/benchmark
+
+ENTRYPOINT ["/app/benchmark"]
+
+CMD ["-server", "127.0.0.1:7811", "-c", "10"]

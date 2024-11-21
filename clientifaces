@@ -1,0 +1,72 @@
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host noprefixroute 
+       valid_lft forever preferred_lft forever
+2: ens18: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether bc:24:11:79:be:ab brd ff:ff:ff:ff:ff:ff
+    altname enp0s18
+    inet 10.0.0.2/16 metric 100 brd 10.0.255.255 scope global dynamic ens18
+       valid_lft 6339sec preferred_lft 6339sec
+    inet6 fe80::be24:11ff:fe79:beab/64 scope link 
+       valid_lft forever preferred_lft forever
+3: ens19: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether bc:24:11:3a:b3:57 brd ff:ff:ff:ff:ff:ff
+    altname enp0s19
+    inet 10.0.0.3/16 metric 100 brd 10.0.255.255 scope global dynamic ens19
+       valid_lft 6339sec preferred_lft 6339sec
+    inet6 fe80::be24:11ff:fe3a:b357/64 scope link 
+       valid_lft forever preferred_lft forever
+4: ens20: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether bc:24:11:74:70:20 brd ff:ff:ff:ff:ff:ff
+    altname enp0s20
+    inet 10.0.0.4/16 metric 100 brd 10.0.255.255 scope global dynamic ens20
+       valid_lft 6339sec preferred_lft 6339sec
+    inet6 fe80::be24:11ff:fe74:7020/64 scope link 
+       valid_lft forever preferred_lft forever
+5: ens21: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether bc:24:11:e4:11:e8 brd ff:ff:ff:ff:ff:ff
+    altname enp0s21
+    inet 10.0.0.5/16 metric 100 brd 10.0.255.255 scope global dynamic ens21
+       valid_lft 6339sec preferred_lft 6339sec
+    inet6 fe80::be24:11ff:fee4:11e8/64 scope link 
+       valid_lft forever preferred_lft forever
+6: ens22: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether bc:24:11:63:3c:3a brd ff:ff:ff:ff:ff:ff
+    altname enp0s22
+    inet 10.0.0.12/16 metric 100 brd 10.0.255.255 scope global dynamic ens22
+       valid_lft 6339sec preferred_lft 6339sec
+    inet6 fe80::be24:11ff:fe63:3c3a/64 scope link 
+       valid_lft forever preferred_lft forever
+7: ens23: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether bc:24:11:b4:95:7f brd ff:ff:ff:ff:ff:ff
+    altname enp0s23
+    inet 10.0.0.7/16 metric 100 brd 10.0.255.255 scope global dynamic ens23
+       valid_lft 6339sec preferred_lft 6339sec
+    inet6 fe80::be24:11ff:feb4:957f/64 scope link 
+       valid_lft forever preferred_lft forever
+8: enp2s1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether bc:24:11:ea:de:cc brd ff:ff:ff:ff:ff:ff
+    inet 10.0.0.8/16 metric 100 brd 10.0.255.255 scope global dynamic enp2s1
+       valid_lft 6339sec preferred_lft 6339sec
+    inet6 fe80::be24:11ff:feea:decc/64 scope link 
+       valid_lft forever preferred_lft forever
+9: enp2s2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether bc:24:11:76:a4:d6 brd ff:ff:ff:ff:ff:ff
+    inet 10.0.0.9/16 metric 100 brd 10.0.255.255 scope global dynamic enp2s2
+       valid_lft 6339sec preferred_lft 6339sec
+    inet6 fe80::be24:11ff:fe76:a4d6/64 scope link 
+       valid_lft forever preferred_lft forever
+10: enp2s3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether bc:24:11:dd:af:10 brd ff:ff:ff:ff:ff:ff
+    inet 10.0.0.10/16 metric 100 brd 10.0.255.255 scope global dynamic enp2s3
+       valid_lft 6339sec preferred_lft 6339sec
+    inet6 fe80::be24:11ff:fedd:af10/64 scope link 
+       valid_lft forever preferred_lft forever
+11: enp2s4: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether bc:24:11:2d:38:c7 brd ff:ff:ff:ff:ff:ff
+    inet 10.0.0.11/16 metric 100 brd 10.0.255.255 scope global dynamic enp2s4
+       valid_lft 6339sec preferred_lft 6339sec
+    inet6 fe80::be24:11ff:fe2d:38c7/64 scope link 
+       valid_lft forever preferred_lft forever

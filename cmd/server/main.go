@@ -1,13 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"go-discord/pkg/message"
 	pkgzerolog "go-discord/pkg/zerolog"
-	"io"
 	"net"
 	"net/http"
+	"runtime"
 	"sync"
 	"time"
 
@@ -20,11 +21,7 @@ import (
 )
 
 // TODO:
-// 1. Message broadcasting (global groups)
-// 2. People can start own groups
-// 3. A person can "whisper" to other person
-// 4. Rate limiting
-// 5. Performance optimization: clients in map or slice (use BinarySearch or other fast slice algo to remove)
+// 1. Prevent "slow-loris" attack where clients keep stuffing bytes without ever sending the termination byte
 
 type ClientState byte
 
@@ -40,9 +37,6 @@ type Client struct {
 }
 
 func (c *Client) Addr() string {
-	// if c == nil || c.Conn == nil {
-	// 	return ""
-	// }
 	return c.Conn.RemoteAddr().String()
 }
 
@@ -65,6 +59,8 @@ var (
 	addr        = flag.String("addr", ":7811", "address the server listens to")
 	metricsAddr = flag.String("metrics-addr", ":2911", "address the server listens to")
 	logLevel    = flag.String("log-level", "info", "log level")
+
+	broadcasterGoroutinesNum = flag.Int("broadcaster-goroutine-num", runtime.NumCPU(), "number of broadcaster goroutines")
 )
 
 var (
@@ -72,7 +68,21 @@ var (
 		Name: "godc_clients_connected_total",
 		Help: "Total number of connected clients",
 	})
+	broadcastsInflightCount = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "godc_broadcasts_inflight",
+		Help: "Number of currently in-flight broadcasts",
+	})
+	broadcastsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "godc_broadcasts_total",
+		Help: "Total number of broadcasts",
+	})
+	broadcastsClientsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "godc_broadcasts_clients_total",
+		Help: "Total number of broadcasted clients",
+	})
 )
+
+// func takeN(s string, n int) string
 
 func main() {
 	flag.Parse()
@@ -95,7 +105,7 @@ func main() {
 	serverLogger := log.With().Str("context", "server").Logger()
 	server := NewServer(listener, &Config{
 		ClientRemoverGoroutinesNum: 4,
-		BroadcastGoroutinesNum:     4,
+		BroadcastGoroutinesNum:     *broadcasterGoroutinesNum,
 	}, &serverLogger)
 	wg.Add(1)
 	go func() {
@@ -167,26 +177,30 @@ func (s *Server) Start() {
 func (s *Server) handleClient(c *Client) {
 	conn := c.Conn
 
-	logger := log.With().Str("remote_addr", conn.RemoteAddr().String()).Logger()
+	logger := log.With().Str("client", conn.RemoteAddr().String()).Logger()
 
 	b := make([]byte, 2)
 	for {
-		err := readConn(conn, &b, func(msg []byte) {
-			logger.Debug().Msgf("got message %s", string(msg))
+		err := s.readClient(c, &b, func(msg []byte) {
+			broadcastsInflightCount.Inc()
+
 			a := time.Now()
 			s.BroadcastAll(msg)
-			logger.Info().Msgf("broadcast completed in %v", time.Now().Sub(a))
+			logger.Info().Msgf("broadcast completed in %v", time.Since(a))
+
+			broadcastsTotal.Inc()
+			broadcastsInflightCount.Dec()
 		})
 		if err != nil {
-			if err == io.EOF {
-				logger.Debug().Msg("client closing")
-				removeClientErr := s.RemoveClient(c)
-				if removeClientErr != nil {
-					log.Err(removeClientErr).Str("client", c.Addr()).Msg("remove client error")
-				}
-				return
+			logger.Debug().
+				Str("last_message", string(b[:])).
+				Err(err).
+				Msg("failed to read connection, removing  client")
+			removeClientErr := s.RemoveClient(c)
+			if removeClientErr != nil {
+				logger.Err(removeClientErr).Msg("remove client error")
 			}
-			logger.Debug().Err(err).Msg("failed to read connection")
+			return
 		}
 	}
 }
@@ -194,7 +208,7 @@ func (s *Server) handleClient(c *Client) {
 func (s *Server) AddClient(c *Client) {
 	s.mu.Lock()
 	defer func() {
-		defer s.mu.Unlock()
+		s.mu.Unlock()
 		clientsCount.Set(float64(len(s.ClientsMap)))
 	}()
 
@@ -220,12 +234,7 @@ func (s *Server) AddClient(c *Client) {
 
 func (s *Server) RemoveClient(c *Client) error {
 	s.mu.Lock()
-	defer func() {
-		defer s.mu.Unlock()
-		clientsCount.Set(float64(len(s.ClientsMap)))
-	}()
 
-	// c.State = ClientStateRemoved
 	cid := c.ID()
 	delete(s.ClientsMap, cid)
 	sliceIndex := s.ClientIDToSliceIndexMap[cid]
@@ -237,12 +246,17 @@ func (s *Server) RemoveClient(c *Client) error {
 
 	delete(s.ClientIDToSliceIndexMap, cid)
 
+	// unlock before closing the connection
+	// so the critical section is narrowed down
+	// since Conn.Close() can take long time, holding the lock
+	s.mu.Unlock()
+
+	clientsCount.Set(float64(len(s.ClientsMap)))
+
 	connCloseErr := c.Conn.Close()
 	if connCloseErr != nil {
 		return connCloseErr
 	}
-
-	// s.Logger.Debug().Msgf("reusing seat %v for client %v", clientSeat, c.ID())
 
 	return nil
 }
@@ -253,10 +267,6 @@ func (s *Server) GetClientSeat() int {
 		return i
 	}
 	return -1
-}
-
-func (s *Server) disposeRemovedClient() {
-
 }
 
 func (s *Server) BroadcastAll(msg []byte) {
@@ -270,13 +280,6 @@ func (s *Server) BroadcastAll(msg []byte) {
 	}
 	actualGos := min(gos, len(s.ClientsMap))
 	wg.Add(actualGos)
-
-	// gos: 4
-	// addition: 1
-	// pergor: 11/4: 2
-	// remainder: 3
-	//   - [0]: {0, 3}
-	//   - []
 
 	prevhi := 0
 
@@ -298,7 +301,7 @@ func (s *Server) BroadcastAll(msg []byte) {
 				Int("addition", addition).
 				Int("prevhi", prevhi).
 				Any("clientsRange", clientsRange).
-				Msgf("debug")
+				Msgf("broadcaster")
 
 			defer wg.Done()
 
@@ -312,12 +315,8 @@ func (s *Server) BroadcastAll(msg []byte) {
 				if c == nil {
 					continue
 				}
-				s.Logger.
-					Debug().
-					Str("client", c.Addr()).
-					Int("go", goIdx).
-					Msg("sending to client")
-				_, connWriteErr := c.Conn.Write(msg)
+				var connWriteErr error
+				// _, connWriteErr := c.Conn.Write(msg)
 				if connWriteErr != nil {
 					s.Logger.
 						Err(connWriteErr).
@@ -325,11 +324,6 @@ func (s *Server) BroadcastAll(msg []byte) {
 						Int("go", goIdx).
 						Msg("sending to cliient")
 				}
-				s.Logger.
-					Debug().
-					Str("client", c.Addr()).
-					Int("go", goIdx).
-					Msg("sent to client")
 
 			}
 		}(clientsRange)
@@ -343,12 +337,10 @@ func (s *Server) SendTo(target *Client, msg []byte) {
 
 }
 
-const MiB = 1048576
+const KiB = 1024
+const MessageBufferMaxSize = (4 * KiB)
 
-// The addition is to account for: null termination and send signifier
-const MessageBufferMaxSize = (8 * MiB) + 2
-
-var MaxBufferSizeExceededError = errors.New("max buffer size exceeded")
+var ErrorMaxBufferSizeExceeded = errors.New("max buffer size exceeded")
 
 func min(a, b int) int {
 	if a < b {
@@ -357,74 +349,113 @@ func min(a, b int) int {
 	return b
 }
 
-type MessageBuffer struct {
-	buf *[]byte
-	off int
-}
-
-// readConn efficiently reads connection with max buffer size upper bound.
+// readClient efficiently reads connection with max buffer size upper bound.
+//
 // It's efficient because it reuses and lazily allocates buffer.
-func readConn(conn *net.TCPConn, b *[]byte, cb func(b []byte)) error {
-	// fmt.Println(len(*b), cap(*b), "before read loop")
-	endOfText := false
+func (s *Server) readClient(client *Client, b *[]byte, cb func(b []byte)) error {
+	conn := client.Conn
+	eot := false
+	// ensure the length of slice is 0
+	// to begin filling array from the beginning,
+	// instead of from the initial slice length
+	*b = (*b)[:0]
 	for {
-		if endOfText {
-			// reset pointer to 0
-			*b = (*b)[:0]
-			endOfText = false
+		if eot {
+			eot = false
 		}
-		derefb := *b
-		sLo := len(derefb)
-		sHi := cap(derefb)
-		// fmt.Println("waiting for read")
-		n, err := conn.Read(derefb[sLo:sHi])
-		derefb = derefb[:len(derefb)+n]
-		// fmt.Println(n, err, string(derefb), string((*b)[:len(*b)+n]), "after conn.Read")
+		sLo := len(*b)
+		sHi := cap(*b)
+		n, err := conn.Read((*b)[sLo:sHi])
 		if err != nil {
 			return err
 		}
 
-		// // null termination for efficiency
-		// // so we don't have to clear the buffer when we are done with reading message
-		// if len(derefb) > 0 {
-		// 	derefb[len(derefb)] = 0
-		// }
+		*b = (*b)[:len(*b)+n]
+		newData := (*b)[sLo:]
+		// Before this change, I assumed that all TCP streams that come
+		// are full message. In reality,
+		// stream could arrive with incomplete message.
+		// And this is perfectly valid case, my server needs to handle it.
+		//
+		// Let's take an example.
+		// We can establish TCP connection to NGINX server
+		// and begin sending incomplete streams.
+		// Say, in one write() call we send "GET", the next is " / H", the next is "TTP/1.1"
+		// It's perfectly valid way to stream bytes to the server since NGINX will not treat any
+		// complete call to recv() as a valid message. Rather, it buffers the message until some condition is true.
+		// After that NGINX can start begin to parse/process the message.
+		term := bytes.IndexByte(newData, message.TerminationByte)
+		if term >= 0 {
+			restFromIdx := sLo + term
+			cb((*b)[0:restFromIdx])
 
-		// fmt.Println(len(derefb), cap(derefb), "OUT DA if len(derefb) == cap(derefb)")
-		if len(derefb) == cap(derefb) {
-			if cap(derefb) >= MessageBufferMaxSize {
-				return MaxBufferSizeExceededError
+			var rest []byte
+			if (len(*b) - 1) > restFromIdx {
+				rest = (*b)[restFromIdx+1:]
+			} else {
+				rest = []byte{}
+			}
+			s.Logger.Debug().
+				Str("message cb'ed", string((*b)[0:restFromIdx])).
+				Str("newData", string(newData)).
+				Int("term", term).
+				Str("rest", string(rest)).
+				Int("restFromIdx", restFromIdx).
+				Msg("readClient(): term>=0")
+			// reset pointer up to len(rest) to make
+			// space for the rest of the slice after termination
+			*b = (*b)[:len(rest)]
+			// move the rest of the slice to beginning again, reusing buffer
+			copy(*b, rest)
+			s.Logger.Debug().
+				Str("b", string(*b)).
+				Int("len(b)", len(*b)).
+				Msg("b after reset")
+		}
+
+		// entire write: abcdefghijklmn\x03akdhasjhas\x03askdnsadnas\x03sugandi
+		//
+		// derefb[0:]: abcdefghijklmn\x03a
+		// filled: ijklmn\x03a
+		// term: 6
+		// rest: a
+		// cb slice: abcdefghijklmn
+		// restFromIdx: 8+6=14
+		// len(*b): 1
+		// *b: a
+		//
+		// derefb[0:]: abcdefghijklmn\x03akdhasjhas\x03askdns
+		// filled: kdhasjhas\x03askdns
+		// term: 9
+		// cb slice: akdhasjhas
+		// lastFoundTermindex: 10
+		//
+		// derefb[0:]: abcdefghijklmn\x03akdhasjhas\x03askdnsadnas\x03sugandi
+		// filled: adnas\x03
+		// term: 5
+		// cb slice: askdnsadnas
+		// lastFoundTermIndex: 32+5=37
+
+		if len(*b) == cap(*b) {
+			if cap(*b) >= MessageBufferMaxSize {
+				return ErrorMaxBufferSizeExceeded
 			}
 
-			// 1918476 B
-			// 3836952 B
-			// 7673904 B
-			// 8388608 B
-
-			// create new slice ourself
-			// use Go rule capacity growing
+			// grow slice
 			newCap := 0
-			if cap(derefb) < 256 {
-				newCap = cap(derefb) * 2
+			if cap(*b) < 256 {
+				newCap = cap(*b) * 2
 			} else {
-				newCap = (cap(derefb) + 768) / 4
+				newCap = cap(*b) + ((cap(*b) + 768) / 4)
 			}
 			newCap = min(MessageBufferMaxSize, newCap)
-			log.Trace().Msgf("new allocation from %d to %d, msg=%s", cap(derefb), newCap, string(derefb))
-			newSlice := make([]byte, len(derefb), newCap)
-			copy(newSlice, derefb)
+			s.Logger.Trace().
+				Str("client", client.Addr()).
+				Msgf("new allocation from %d to %d msg=%s", cap(*b), newCap, string((*b)[0:]))
+			newSlice := make([]byte, len(*b), newCap)
+			copy(newSlice, *b)
 			*b = newSlice
-			derefb = *b
+		}
 
-			// fmt.Println(len(derefb), cap(derefb), "IN DA if len(derefb) == cap(derefb)")
-		}
-		// cb(derefb[0:])
-		// fmt.Printf("message: b=%#+v s=%s\n", derefb, derefb)
-		if derefb[len(derefb)-1] == message.LineTerminationByte {
-			cb(derefb[0:])
-			// fmt.Printf("cb done msg=%s\n", derefb[0:])
-			// fmt.Printf("%s\n", derefb[0:])
-			endOfText = true
-		}
 	}
 }

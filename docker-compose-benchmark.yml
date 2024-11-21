@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  benchmark:
+    build:
+      context: .
+      dockerfile: Dockerfile.benchmark
+    networks:
+      - benchmark-net
+    command: ["-server", "10.0.0.2:7811", "-c", "15000"]
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '20'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '1'
+    #       memory: 1G
+
+networks:
+  benchmark-net:
+    driver: bridge

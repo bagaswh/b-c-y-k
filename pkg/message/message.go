@@ -1,4 +1,4 @@
 package message
 
 // When the end of
-const LineTerminationByte byte = 3
+const TerminationByte byte = 3

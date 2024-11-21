@@ -47,7 +47,7 @@ func main() {
 		fmt.Scanln(&input)
 		fmt.Println(input)
 		conn.Write([]byte(input))
-		conn.Write([]byte{message.LineTerminationByte})
+		conn.Write([]byte{message.TerminationByte})
 	}
 
 }
